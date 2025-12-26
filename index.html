@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Détecteur Ultrasons | SOSIPHONE PARIS</title>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --text-color: #e2e8f0;
+            --accent-color: #3b82f6;
+            --alert-color: #ef4444;
+            --safe-color: #22c55e;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 20px;
+            text-align: center;
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        .logo {
+            color: var(--accent-color);
+            font-weight: 800;
+        }
+
+        .subtitle {
+            font-size: 0.9rem;
+            opacity: 0.7;
+            margin-bottom: 2rem;
+        }
+
+        .status-box {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 20px;
+            border-radius: 15px;
+            width: 100%;
+            max-width: 400px;
+            margin-bottom: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        #status-indicator {
+            font-size: 2rem;
+            font-weight: bold;
+            display: block;
+            margin: 10px 0;
+        }
+
+        .safe { color: var(--safe-color); }
+        .danger { color: var(--alert-color); animation: pulse 1s infinite; }
+
+        canvas {
+            width: 100%;
+            height: 150px;
+            background: #000;
+            border-radius: 10px;
+            margin-top: 10px;
+        }
+
+        button {
+            background-color: var(--accent-color);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 1rem;
+            border-radius: 50px;
+            cursor: pointer;
+            font-weight: bold;
+            box-shadow: 0 4px 15px rgba(59, 130, 246, 0.4);
+            transition: transform 0.2s;
+        }
+
+        button:active {
+            transform: scale(0.95);
+        }
+
+        .info-text {
+            font-size: 0.8rem;
+            color: #64748b;
+            margin-top: 30px;
+            max-width: 300px;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+
+    <h1>SOSIPHONE <span class="logo">PARIS</span></h1>
+    <div class="subtitle">Scanner de fréquences invisibles (18-22kHz)</div>
+
+    <div class="status-box">
+        <div>STATUT ACTUEL</div>
+        <div id="status-indicator" class="safe">EN ATTENTE</div>
+        <div id="frequency-display" style="font-size: 0.9rem; opacity: 0.8;">Appuyez sur "LANCER LE SCAN"</div>
+        <canvas id="visualizer"></canvas>
+    </div>
+
+    <button id="start-btn" onclick="startDetection()">LANCER LE SCAN 🛡️</button>
+
+    <p class="info-text">
+        🔒 Confidentialité : L'analyse se fait localement sur votre appareil. Aucun son n'est enregistré ni envoyé sur un serveur.
+    </p>
+
+    <script>
+        let audioContext;
+        let analyser;
+        let microphone;
+        let javascriptNode;
+        let isRunning = false;
+
+        async function startDetection() {
+            if (isRunning) return;
+            
+            const btn = document.getElementById('start-btn');
+            const status = document.getElementById('status-indicator');
+            const freqDisplay = document.getElementById('frequency-display');
+
+            try {
+                // Demande accès micro
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+                
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser();
+                microphone = audioContext.createMediaStreamSource(stream);
+                
+                // Configuration pour haute fréquence
+                analyser.fftSize = 2048;
+                microphone.connect(analyser);
+
+                btn.innerText = "ANALYSE EN COURS...";
+                btn.style.backgroundColor = "#475569";
+                isRunning = true;
+
+                drawVisualizer();
+                analyzeFrequencies();
+
+            } catch (err) {
+                alert("Erreur : Impossible d'accéder au micro. Vérifiez vos permissions.");
+                console.error(err);
+            }
+        }
+
+        function analyzeFrequencies() {
+            if (!isRunning) return;
+
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+            analyser.getByteFrequencyData(dataArray);
+
+            // Calculer où se trouvent les fréquences 18kHz - 22kHz dans le tableau
+            // Nyquist = sampleRate / 2.
+            const nyquist = audioContext.sampleRate / 2;
+            const step = nyquist / bufferLength;
+            
+            const lowIndex = Math.floor(18000 / step);
+            const highIndex = Math.floor(22000 / step);
+            
+            let maxVolumeInTargetRange = 0;
+            let maxFreq = 0;
+
+            for (let i = lowIndex; i < highIndex; i++) {
+                if (dataArray[i] > maxVolumeInTargetRange) {
+                    maxVolumeInTargetRange = dataArray[i];
+                    maxFreq = i * step;
+                }
+            }
+
+            const status = document.getElementById('status-indicator');
+            const freqDisplay = document.getElementById('frequency-display');
+
+            // Seuil de détection (ajustable)
+            if (maxVolumeInTargetRange > 50) { 
+                status.innerText = "ULTRASONS DÉTECTÉS !";
+                status.className = "danger";
+                freqDisplay.innerText = "Pic détecté à : " + Math.round(maxFreq) + " Hz";
+            } else {
+                status.innerText = "SÉCURISÉ";
+                status.className = "safe";
+                freqDisplay.innerText = "Aucune anomalie détectée";
+            }
+
+            requestAnimationFrame(analyzeFrequencies);
+        }
+
+        function drawVisualizer() {
+            const canvas = document.getElementById("visualizer");
+            const canvasCtx = canvas.getContext("2d");
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+
+            function draw() {
+                requestAnimationFrame(draw);
+                analyser.getByteFrequencyData(dataArray);
+
+                canvasCtx.fillStyle = 'rgb(0, 0, 0)';
+                canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+
+                const barWidth = (canvas.width / bufferLength) * 2.5;
+                let barHeight;
+                let x = 0;
+
+                for(let i = 0; i < bufferLength; i++) {
+                    barHeight = dataArray[i] / 2;
+                    // Colorer en rouge les hautes fréquences
+                    if (i > bufferLength * 0.7) {
+                        canvasCtx.fillStyle = `rgb(${barHeight + 100}, 50, 50)`;
+                    } else {
+                        canvasCtx.fillStyle = `rgb(50, ${barHeight + 100}, 255)`;
+                    }
+                    canvasCtx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
+                    x += barWidth + 1;
+                }
+            }
+            draw();
+        }
+    </script>
+</body>
+</html>
